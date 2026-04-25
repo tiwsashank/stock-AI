@@ -241,7 +241,7 @@ with tab1:
                 </div>""", unsafe_allow_html=True)
 
         st.markdown('<div class="sec-header">Refresh Scan</div>', unsafe_allow_html=True)
-        st.markdown('<div class="warn-pill">⏱ Every 3 months · ~$0.30 · 10-15 mins for 100 stocks with fundamentals</div>', unsafe_allow_html=True)
+        st.markdown('<div class="warn-pill">⏱ Run monthly · ~$0.30 · 10-15 mins for 100 stocks with fundamentals</div>', unsafe_allow_html=True)
         if st.button("🔄 Run New Scan"):
             with st.spinner("Scanning 100 stocks with fundamentals..."):
                 from scanner import run_monthly_scan
