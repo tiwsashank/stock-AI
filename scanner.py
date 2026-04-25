@@ -1,10 +1,10 @@
-# scanner.py — Monthly scan + cache results
+# scanner.py — Monthly scan + cache results (with fundamentals)
 import json
 import os
 from datetime import datetime
-from week1_data import get_stock_data, add_indicators, get_signal
+from week1_data import get_stock_data, add_indicators, get_signal, get_fundamentals, get_combined_score
 from week2_ai import get_news_sentiment, client
-from watchlist import get_all_tickers
+from watchlist import get_all_tickers, get_sector
 import pandas as pd
 
 CACHE_FILE = "cache/recommendations.json"
@@ -14,7 +14,7 @@ def score_stock(ticker_info):
     try:
         df = get_stock_data(ticker, period="6mo")
         df = add_indicators(df)
-        signal, score = get_signal(df)
+        signal, tech_score = get_signal(df)
         latest = df.iloc[-1]
 
         close = float(latest['Close'])
@@ -24,43 +24,60 @@ def score_stock(ticker_info):
         macd = float(latest['MACD']) if not pd.isna(latest['MACD']) else 0
         macd_sig = float(latest['MACD_signal']) if not pd.isna(latest['MACD_signal']) else 0
 
-        tech_score = score
         if close > sma200: tech_score += 2
         if close > sma50: tech_score += 1
         if 40 <= rsi <= 60: tech_score += 1
 
+        print(f"    Fetching fundamentals...")
+        fund = get_fundamentals(ticker)
+        fund_score = fund.get('fund_score', 0)
+        combined = get_combined_score(tech_score, fund_score, "NEUTRAL")
+
         return {
             "ticker": ticker,
-            "sector": ticker_info['sector'],
+            "sector": get_sector(ticker),
             "market": ticker_info['market'],
             "price": round(close, 2),
             "rsi": round(rsi, 1),
             "signal": signal,
             "tech_score": tech_score,
+            "fund_score": fund_score,
+            "combined_score": combined,
             "above_sma200": close > sma200,
-            "macd_bullish": macd > macd_sig
+            "macd_bullish": macd > macd_sig,
+            "pe_ratio": fund.get('pe_ratio'),
+            "revenue_growth": fund.get('revenue_growth'),
+            "profit_margin": fund.get('profit_margin'),
+            "analyst_rating": fund.get('analyst_rating', 'N/A'),
+            "upside_pct": fund.get('upside_pct'),
+            "debt_to_equity": fund.get('debt_to_equity'),
+            "week_52_position_pct": fund.get('week_52_position_pct'),
+            "dividend_yield": fund.get('dividend_yield'),
+            "industry": fund.get('industry', 'N/A'),
         }
     except Exception as e:
-        print(f"  Error: {ticker} — {e}")
+        print(f"  Error: {ticker} - {e}")
         return None
 
 def get_ai_recommendations(top_stocks):
-    prompt = f"""You are a financial advisor for medium-term investments (1-6 months).
+    prompt = f"""You are a professional financial advisor specializing in medium-term investments (1-6 months).
 
-Analyze these technically strong stocks and give final buy recommendations.
+Analyze these stocks combining technical momentum AND fundamental strength.
 
 STOCKS:
 {json.dumps(top_stocks, indent=2)}
 
 Return JSON with:
-- recommendations: list of objects each with:
+- recommendations: list of up to 5 objects each with:
   - ticker: string
   - sector: string
   - rank: number
   - action: BUY or STRONG BUY
-  - reasoning: 2 sentence explanation
-  - target_horizon: e.g. 2-3 months
+  - reasoning: 3 sentence explanation covering both technical AND fundamental factors
+  - target_horizon: e.g. 2-4 months
   - risk: LOW / MEDIUM / HIGH
+  - key_strength: one short phrase
+  - key_risk: one short phrase
 - summary: 2 sentence overall market comment
 
 Return ONLY valid JSON."""
@@ -78,9 +95,9 @@ Return ONLY valid JSON."""
     return json.loads(content)
 
 def run_monthly_scan():
-    print("="*50)
-    print("MONTHLY STOCK SCAN")
-    print("="*50)
+    print("=" * 50)
+    print("MONTHLY SCAN — Technical + Fundamental")
+    print("=" * 50)
 
     all_tickers = get_all_tickers()
     print(f"Scanning {len(all_tickers)} stocks...")
@@ -92,33 +109,34 @@ def run_monthly_scan():
         if result:
             scores.append(result)
 
-    # Sort by tech score
-    scores.sort(key=lambda x: x['tech_score'], reverse=True)
+    scores.sort(key=lambda x: x['combined_score'], reverse=True)
 
-    # Get news for top 10 only — saves API cost
-    print("\nGetting news for top 10 stocks...")
+    print("\nGetting news for top 10...")
     top10 = scores[:10]
     for stock in top10:
         sentiment = get_news_sentiment(stock['ticker'])
         stock['sentiment'] = sentiment.get('sentiment', 'NEUTRAL')
         stock['news_summary'] = sentiment.get('summary', '')
+        stock['combined_score'] = get_combined_score(
+            stock['tech_score'], stock['fund_score'], stock['sentiment']
+        )
 
-    # Add neutral sentiment for rest
+    top10.sort(key=lambda x: x['combined_score'], reverse=True)
+
     for stock in scores[10:]:
         stock['sentiment'] = 'NEUTRAL'
         stock['news_summary'] = ''
 
-    # AI recommendations for top 10
     print("\nGenerating AI recommendations...")
     ai_result = get_ai_recommendations(top10)
 
-    # Build cache
     cache = {
         "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "total_scanned": len(scores),
         "all_scores": scores,
         "recommendations": ai_result.get("recommendations", []),
-        "market_summary": ai_result.get("summary", "")
+        "market_summary": ai_result.get("summary", ""),
+        "scoring_method": "Technical 40% + Fundamental 40% + Sentiment 20%"
     }
 
     os.makedirs("cache", exist_ok=True)
@@ -126,9 +144,8 @@ def run_monthly_scan():
         json.dump(cache, f, indent=2)
 
     print(f"\nDone! Results saved to {CACHE_FILE}")
-    print(f"Top 5 picks:")
     for r in cache['recommendations'][:5]:
-        print(f"  #{r['rank']} {r['ticker']} — {r['action']}")
+        print(f"  #{r['rank']} {r['ticker']} — {r['action']} | {r.get('key_strength','')}")
 
     return cache
 
