@@ -242,11 +242,15 @@ with tab1:
 
         st.markdown('<div class="sec-header">Refresh Scan</div>', unsafe_allow_html=True)
         st.markdown('<div class="warn-pill">⏱ Run monthly · ~$0.30 · 10-15 mins for 100 stocks with fundamentals</div>', unsafe_allow_html=True)
+        scan_password = st.text_input("Scan password", type="password", placeholder="Enter password to run scan", key="scan_pwd")
         if st.button("🔄 Run New Scan"):
-            with st.spinner("Scanning 100 stocks with fundamentals..."):
-                from scanner import run_monthly_scan
-                run_monthly_scan()
-            st.markdown('<div class="ok-pill">✅ Done! Reload page to see results.</div>', unsafe_allow_html=True)
+            if scan_password == st.secrets.get("SCAN_PASSWORD", ""):
+                with st.spinner("Scanning 100 stocks with fundamentals..."):
+                    from scanner import run_monthly_scan
+                    run_monthly_scan()
+                st.markdown('<div class="ok-pill">✅ Done! Reload page to see results.</div>', unsafe_allow_html=True)
+            else:
+                st.markdown('<div class="warn-pill">❌ Incorrect password. Only the owner can run scans.</div>', unsafe_allow_html=True)
 
 # ══════════════════════════════
 # TAB 2: STOCK ANALYSIS
